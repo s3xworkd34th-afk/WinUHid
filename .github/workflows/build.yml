@@ -42,6 +42,28 @@ jobs:
     - name: Install vcpkg MSBuild integration
       run: ${{ github.workspace }}/vcpkg/vcpkg.exe integrate install
 
+    - name: Find VHF library
+      shell: pwsh
+      run: |
+        $roots = @(
+          "$env:USERPROFILE\.nuget\packages",
+          "$env:GITHUB_WORKSPACE\packages",
+          "${env:ProgramFiles(x86)}\Windows Kits\10"
+        )
+        $found = @(
+          foreach ($root in $roots) {
+            if (Test-Path $root) {
+              Get-ChildItem -Path $root -Filter VhfUm.lib -Recurse -File -ErrorAction SilentlyContinue
+            }
+          }
+        )
+        if ($found.Count -eq 0) {
+          Write-Error "VhfUm.lib was not found in the checked locations."
+          exit 1
+        }
+        $found | ForEach-Object { Write-Host "Found: $($_.FullName)" }
+        "LIB=$($found[0].DirectoryName);$env:LIB" >> $env:GITHUB_ENV
+
     - name: Build solution
       run: msbuild "WinUHid Driver/WinUHid Driver.vcxproj" /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }} /m /verbosity:minimal
 
