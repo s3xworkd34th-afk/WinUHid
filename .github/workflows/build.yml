@@ -43,7 +43,7 @@ jobs:
       run: ${{ github.workspace }}/vcpkg/vcpkg.exe integrate install
 
     - name: Build solution
-      run: msbuild WinUHid.sln /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }} /m /verbosity:minimal
+      run: msbuild "WinUHid Driver/WinUHid Driver.vcxproj" /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }} /m /verbosity:minimal
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
