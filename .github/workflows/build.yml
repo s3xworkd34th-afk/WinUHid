@@ -1,3 +1,4 @@
+
 name: Build WinUHid
 
 on:
@@ -15,7 +16,7 @@ on:
 
 jobs:
   build:
-    name: Build WinUHid
+    name: Build WinUHid (Release x64)
     runs-on: windows-latest
 
     strategy:
@@ -25,52 +26,97 @@ jobs:
         platform: [x64]
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Add MSBuild to PATH
-      uses: microsoft/setup-msbuild@v2
-      with:
-        msbuild-architecture: x64
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+        with:
+          msbuild-architecture: x64
 
-    - name: Restore NuGet packages
-      run: msbuild "WinUHid Driver/WinUHid Driver.vcxproj" /t:Restore /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }}
+      - name: Restore NuGet packages
+        shell: pwsh
+        run: |
+          msbuild "WinUHid Driver/WinUHid Driver.vcxproj" /t:Restore /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }}
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-    - name: Setup vcpkg
-      uses: lukka/run-vcpkg@v11
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
 
-    - name: Install vcpkg MSBuild integration
-      run: ${{ github.workspace }}/vcpkg/vcpkg.exe integrate install
+      - name: Install vcpkg MSBuild integration
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE/vcpkg/vcpkg.exe" integrate install
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-    - name: Find VHF library
-      shell: pwsh
-      run: |
-        $roots = @(
-          "$env:USERPROFILE\.nuget\packages",
-          "$env:GITHUB_WORKSPACE\packages",
-          "${env:ProgramFiles(x86)}\Windows Kits\10"
-        )
-        $found = @(
-          foreach ($root in $roots) {
-            if (Test-Path $root) {
-              Get-ChildItem -Path $root -Filter VhfUm.lib -Recurse -File -ErrorAction SilentlyContinue
+      - name: Find VHF library
+        shell: pwsh
+        run: |
+          $roots = @(
+            "$env:USERPROFILE\.nuget\packages",
+            "$env:GITHUB_WORKSPACE\packages",
+            "${env:ProgramFiles(x86)}\Windows Kits\10"
+          )
+
+          $found = @(
+            foreach ($root in $roots) {
+              if (Test-Path $root) {
+                Get-ChildItem -Path $root -Filter VhfUm.lib -Recurse -File -ErrorAction SilentlyContinue |
+                  Where-Object { $_.FullName -match '[\\/]x64[\\/]' }
+              }
             }
+          )
+
+          if ($found.Count -eq 0) {
+            Write-Error "VhfUm.lib was not found."
+            exit 1
           }
-        )
-        if ($found.Count -eq 0) {
-          Write-Error "VhfUm.lib was not found in the checked locations."
-          exit 1
-        }
-        $found | ForEach-Object { Write-Host "Found: $($_.FullName)" }
-        "LIB=$($found[0].DirectoryName);$env:LIB" >> $env:GITHUB_ENV
 
-    - name: Build solution
-      run: msbuild "WinUHid Driver/WinUHid Driver.vcxproj" /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }} /m /verbosity:minimal
+          $found | ForEach-Object {
+            Write-Host "Found: $($_.FullName)"
+          }
 
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: WinUHid-${{ matrix.configuration }}-${{ matrix.platform }}
-        path: |
-          build/${{ matrix.configuration }}/${{ matrix.platform }}/WinUHid.*
-          WinUHid/WinUHid.h
+          $libPath = $found[0].DirectoryName
+          "VHF_LIB_DIR=$libPath" >> $env:GITHUB_ENV
+
+      - name: Build WinUHid Driver
+        shell: pwsh
+        run: |
+          $libPath = $env:VHF_LIB_DIR
+
+          if (-not (Test-Path "$libPath/VhfUm.lib")) {
+            Write-Error "VhfUm.lib is missing from $libPath"
+            exit 1
+          }
+
+          Write-Host "Using VHF library directory: $libPath"
+
+          $env:LIB = "$libPath;$env:LIB"
+          $env:LINK = "/LIBPATH:`"$libPath`" $env:LINK"
+
+          msbuild "WinUHid Driver/WinUHid Driver.vcxproj" /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }} /m /verbosity:minimal
+
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Show build outputs
+        if: success()
+        shell: pwsh
+        run: |
+          Write-Host "Build output files:"
+          if (Test-Path "build") {
+            Get-ChildItem -Path "build" -Recurse -File |
+              Select-Object -ExpandProperty FullName
+          }
+
+      - name: Upload build artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: WinUHid-Release-x64
+          path: |
+            build/Release/x64/**
+            WinUHid Driver/**/*.inf
+            WinUHid Driver/**/*.cat
+          if-no-files-found: warn
