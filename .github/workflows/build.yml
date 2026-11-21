@@ -21,8 +21,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        configuration: [Debug, Release]
-        platform: [x86, x64, ARM64]
+        configuration: [Release]
+        platform: [x64]
 
     steps:
     - name: Checkout repository
@@ -34,7 +34,7 @@ jobs:
         msbuild-architecture: x64
 
     - name: Restore NuGet packages
-      run: msbuild -t:restore -p:RestorePackagesConfig=true
+      run: msbuild "WinUHid Driver/WinUHid Driver.vcxproj" /t:Restore /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }}
 
     - name: Setup vcpkg
       uses: lukka/run-vcpkg@v11
